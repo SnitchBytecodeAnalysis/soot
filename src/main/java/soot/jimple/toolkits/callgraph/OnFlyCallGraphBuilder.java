@@ -792,7 +792,7 @@ public class OnFlyCallGraphBuilder {
     sites.add(new VirtualCallSite(s, m, iie, subSig, kind));
   }
 
-  private void processNewMethod(SootMethod m) {
+  protected void processNewMethod(SootMethod m) {
     if (m.isConcrete()) {
       Body b = m.retrieveActiveBody();
       getImplicitTargets(m);
@@ -800,7 +800,7 @@ public class OnFlyCallGraphBuilder {
     }
   }
 
-  private void findReceivers(SootMethod m, Body b) {
+  protected void findReceivers(SootMethod m, Body b) {
     for (final Unit u : b.getUnits()) {
       final Stmt s = (Stmt) u;
       if (s.containsInvokeExpr()) {
@@ -856,19 +856,68 @@ public class OnFlyCallGraphBuilder {
     processVirtualEdgeSummary(m, s, s, receiver, target, edgeType);
   }
 
+  private Local getLocalForTarget(InvokeExpr ie, VirtualEdgeTarget target) {
+    if (target.isBase() && ie instanceof InstanceInvokeExpr) {
+      return (Local) ((InstanceInvokeExpr) ie).getBase();
+    }
+
+    int index = target.getArgIndex();
+    if (index < ie.getArgCount()) {
+      Value arg = ie.getArg(index);
+      if (arg instanceof Local) {
+        return (Local) arg;
+      }
+    }
+
+    return null;
+  }
+
+  /** Returns all values that should be mapped to this in the edge target. **/
+  public Set<Local> getReceiversOfVirtualEdge(VirtualEdgeTarget edgeTarget, InvokeExpr invokeExpr) {
+    if (edgeTarget instanceof VirtualEdgesSummaries.IndirectTarget) {
+      VirtualEdgesSummaries.IndirectTarget indirectTarget = (VirtualEdgesSummaries.IndirectTarget) edgeTarget;
+      // Recursion case: We have an indirect target, which leads us to the statement where the local,
+      //                 that gets $this inside the callee, resides.
+
+      // First find the receiver of another call
+      Local l = getLocalForTarget(invokeExpr, edgeTarget);
+      if (l == null) {
+        return Collections.emptySet();
+      }
+
+      List<VirtualCallSite> sites = receiverToSites.get(l);
+      if (sites == null) {
+        return Collections.emptySet();
+      }
+      Set<Local> results = new HashSet<>();
+      MethodSubSignature methodName = edgeTarget.getTargetMethod();
+      // Lookup all call sites on the receiver to find the indirect target method
+      for (VirtualCallSite site : sites) {
+        if (methodName.equals(site.subSig())) {
+          for (VirtualEdgeTarget subTargets : indirectTarget.getTargets()) {
+            // We have found the indirect target, recursively go down till we have a direct target,
+            // where we can get the local that finally gets converted to $this inside the callee.
+            results.addAll(getReceiversOfVirtualEdge(subTargets, site.iie()));
+            // We might have multiple calls of the same method on the receiver (e.g. if else)
+            // as well as multiple sub-targets, thus, we can't break here.
+          }
+        }
+      }
+      return results;
+    }
+
+    assert edgeTarget instanceof DirectTarget;
+    // Base case: Lookup the value based on the index referenced by the VirtualEdgeTarget.
+    //            That local represents the $this local inside the callee.
+    Local l = getLocalForTarget(invokeExpr, edgeTarget);
+    return l == null ? Collections.emptySet() : Collections.singleton(l);
+  }
+
   protected void processVirtualEdgeSummary(SootMethod callSiteMethod, Stmt callSite, final Stmt curStmt, Local receiver,
       VirtualEdgeTarget target, Kind edgeType) {
     // Get the target object referenced by this edge summary
     InvokeExpr ie = curStmt.getInvokeExpr();
-    Local targetLocal = null;
-    if (target.isBase()) {
-      targetLocal = receiver;
-    } else if (target.argIndex < ie.getArgCount()) {
-      Value runnable = ie.getArg(target.argIndex);
-      if (runnable instanceof Local) {
-        targetLocal = (Local) runnable;
-      }
-    }
+    Local targetLocal = getLocalForTarget(ie, target);
     if (targetLocal == null) {
       return;
     }
@@ -1408,4 +1457,9 @@ public class OnFlyCallGraphBuilder {
 
     protected abstract boolean acceptMethod(SootMethod m);
   }
+
+  public VirtualEdgesSummaries getVirtualEdgeSummaries() {
+    return virtualEdgeSummaries;
+  }
+
 }

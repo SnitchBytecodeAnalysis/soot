@@ -34,7 +34,7 @@ import java.util.*;
  * Soot ant task.
  * @author Ondrej Lhotak
  */
-@javax.annotation.Generated(value = "Saxonica v3.0", comments = "from soot_options.xml")
+@jakarta.annotation.Generated(value = "Saxonica v3.0", comments = "from soot_options.xml")
 public class AntTask extends MatchingTask {
     public static final boolean DEBUG = true;
     private void debug(String s) {
@@ -247,6 +247,11 @@ public class AntTask extends MatchingTask {
             if(process_jar_dir == null )
                 process_jar_dir = new Path(getProject());
             return process_jar_dir.createPath();
+        }
+  
+        public void setvirtualedges_path(String arg) {
+            addArg("-virtualedges-path");
+            addArg(arg);
         }
   
         public void setderive_java_version(boolean arg) {

@@ -159,6 +159,12 @@ public class SourceLocator {
   public SourceLocator(Singletons.Global g) {
   }
 
+  public void invalidateCaches() {
+    archivePathToZip.invalidateAll();
+    archivePathToEntriesCache.invalidateAll();
+    pathToSourceType.invalidateAll();
+  }
+
   public static SourceLocator v() {
     return ModuleUtil.module_mode() ? G.v().soot_ModulePathSourceLocator() : G.v().soot_SourceLocator();
   }
@@ -189,6 +195,7 @@ public class SourceLocator {
     for (String originalDir : classPath.split(regex)) {
       if (!originalDir.isEmpty()) {
         try {
+          originalDir = originalDir.replaceAll("\\\\" + Pattern.quote(File.pathSeparator), File.pathSeparator);
           String canonicalDir = new File(originalDir).getCanonicalPath();
           if (ModulePathSourceLocator.DUMMY_CLASSPATH_JDK9_FS.equals(originalDir)) {
             SourceLocator.v().java9Mode = true;
@@ -266,9 +273,6 @@ public class SourceLocator {
 
   protected void setupClassProviders() {
     final List<ClassProvider> classProviders = new LinkedList<ClassProvider>();
-    if (this.java9Mode) {
-      classProviders.add(new AsmJava9ClassProvider());
-    }
     final ClassProvider classFileClassProvider = Options.v().coffi() ? new CoffiClassProvider() : new AsmClassProvider();
     switch (Options.v().src_prec()) {
       case Options.src_prec_class:
@@ -306,6 +310,9 @@ public class SourceLocator {
         break;
       default:
         throw new RuntimeException("Other source precedences are not currently supported.");
+    }
+    if (this.java9Mode) {
+      classProviders.add(new AsmJava9ClassProvider());
     }
     this.classProviders = classProviders;
   }
@@ -896,6 +903,10 @@ public class SourceLocator {
      */
     public SharedCloseable<ZipFile> getRef(String archivePath) throws ExecutionException {
       return cache.get(archivePath);
+    }
+
+    public void invalidateAll() {
+      cache.invalidateAll();
     }
   }
 }
