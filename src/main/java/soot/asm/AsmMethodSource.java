@@ -157,7 +157,6 @@ import static org.objectweb.asm.Opcodes.T_FLOAT;
 import static org.objectweb.asm.Opcodes.T_INT;
 import static org.objectweb.asm.Opcodes.T_LONG;
 import static org.objectweb.asm.Opcodes.T_SHORT;
-
 import static org.objectweb.asm.tree.AbstractInsnNode.FIELD_INSN;
 import static org.objectweb.asm.tree.AbstractInsnNode.FRAME;
 import static org.objectweb.asm.tree.AbstractInsnNode.IINC_INSN;
@@ -222,6 +221,7 @@ import org.slf4j.LoggerFactory;
 
 import soot.ArrayType;
 import soot.Body;
+import soot.BooleanConstant;
 import soot.BooleanType;
 import soot.ByteType;
 import soot.CharType;
@@ -253,7 +253,6 @@ import soot.UnknownType;
 import soot.Value;
 import soot.ValueBox;
 import soot.VoidType;
-import soot.coffi.Util;
 import soot.jimple.AddExpr;
 import soot.jimple.ArrayRef;
 import soot.jimple.AssignStmt;
@@ -528,20 +527,26 @@ public class AsmMethodSource implements MethodSource {
     return AsmUtil.isDWord(t) ? popStackConstDual() : popStackConst();
   }
 
-  void setUnit(AbstractInsnNode insn, Unit u) {
-    if (Options.v().keep_line_number() && lastLineNumber >= 0) {
-      Tag lineTag = u.getTag(LineNumberTag.NAME);
-      if (lineTag == null) {
-        lineTag = new LineNumberTag(lastLineNumber);
-        u.addTag(lineTag);
-      } else if (((LineNumberTag) lineTag).getLineNumber() != lastLineNumber) {
-        throw new RuntimeException("Line tag mismatch");
-      }
+  protected void setUnit(AbstractInsnNode insn, Unit u) {
+    if (lastLineNumber >= 0) {
+      setLineNumber(u, lastLineNumber);
     }
 
     Unit o = units.put(insn, u);
     if (o != null) {
       throw new AssertionError(insn.getOpcode() + " already has a unit, " + o);
+    }
+  }
+
+  protected void setLineNumber(Unit u, int lineNumber) {
+    if (Options.v().keep_line_number()) {
+      Tag lineTag = u.getTag(LineNumberTag.NAME);
+      if (lineTag == null) {
+        lineTag = new LineNumberTag(lineNumber);
+        u.addTag(lineTag);
+      } else if (((LineNumberTag) lineTag).getLineNumber() != lineNumber) {
+        throw new RuntimeException("Line tag mismatch");
+      }
     }
   }
 
@@ -588,7 +593,7 @@ public class AsmMethodSource implements MethodSource {
         }
       }
       int op = opr.insn.getOpcode();
-      if (l == null && op != GETFIELD && op != GETSTATIC && (op < IALOAD && op > SALOAD)) {
+      if (l == null && op != GETFIELD && op != GETSTATIC && (op < IALOAD || op > SALOAD)) {
         continue;
       }
       Local stack = newStackLocal();
@@ -1104,6 +1109,16 @@ public class AsmMethodSource implements MethodSource {
     } else if (op >= IRETURN && op <= ARETURN) {
       convertReturnInsn(insn);
     } else if (op == RETURN) {
+      // We might be at the end of the stack, but there is still a dangling instruction, i.e., a method call whose return
+      // value
+      // was never used. Since the method may have side effects, we need to handle the call.
+      if (!stack.isEmpty()) {
+        Operand o1 = pop();
+        if (!units.containsKey(o1.insn)) {
+          InvokeExpr iexpr = (InvokeExpr) getFrame(o1.insn).out()[0].value;
+          setUnit(o1.insn, Jimple.v().newInvokeStmt(iexpr));
+        }
+      }
       if (!units.containsKey(insn)) {
         setUnit(insn, Jimple.v().newReturnVoidStmt());
       }
@@ -1252,7 +1267,7 @@ public class AsmMethodSource implements MethodSource {
       } else {
         switch (op) {
           case IFEQ:
-            cond = Jimple.v().newEqExpr(v, IntConstant.v(0));
+            cond = Jimple.v().newEqExpr(v, BooleanConstant.v(false));
             break;
           case IFNE:
             cond = Jimple.v().newNeExpr(v, IntConstant.v(0));
@@ -1511,7 +1526,7 @@ public class AsmMethodSource implements MethodSource {
       // create ref to actual method
 
       // Generate parameters & returnType & parameterTypes
-      Type[] types = Util.v().jimpleTypesOfFieldOrMethodDescriptor(insn.desc);
+      Type[] types = AsmUtil.jimpleTypesOfFieldOrMethodDescriptor(insn.desc);
       int nrArgs = types.length - 1;
       List<Type> parameterTypes = new ArrayList<Type>(nrArgs);
       List<Value> methodArgs = new ArrayList<Value>(nrArgs);

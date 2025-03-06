@@ -24,28 +24,6 @@ package soot.dotnet.instructions;
 
 import java.util.ArrayList;
 
-/*-
- * #%L
- * Soot - a J*va Optimization Framework
- * %%
- * Copyright (C) 2015 Steven Arzt
- * %%
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as
- * published by the Free Software Foundation, either version 2.1 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Lesser Public License for more details.
- *
- * You should have received a copy of the GNU General Lesser Public
- * License along with this program.  If not, see
- * <http://www.gnu.org/licenses/lgpl-2.1.html>.
- * #L%
- */
-
 import soot.Body;
 import soot.Local;
 import soot.Unit;
@@ -116,16 +94,19 @@ public class CatchFilterHandlerBody {
       ConditionExpr cond = Jimple.v().newEqExpr(returnValue, IntConstant.v(0));
       IfStmt ifRetCondStmt = Jimple.v().newIfStmt(cond, filterCondFalseNop); // if ret==0 ignore handler
       // jump to end of filter instructions - cond true
-      GotoStmt gotoHandlerBodyCondTrueStmt = Jimple.v().newGotoStmt(handlerBody.getUnits().getFirst());
+      if (!handlerBody.getUnits().isEmpty()) {
+        //this may happen when there is an empty handler
+        GotoStmt gotoHandlerBodyCondTrueStmt = Jimple.v().newGotoStmt(handlerBody.getUnits().getFirst());
 
-      handlerFilterContainerBlockBody.getUnits().insertAfter(gotoHandlerBodyCondTrueStmt, returnStmt);
+        handlerFilterContainerBlockBody.getUnits().insertAfter(gotoHandlerBodyCondTrueStmt, returnStmt);
+      }
       handlerFilterContainerBlockBody.getUnits().swapWith(returnStmt, ifRetCondStmt);
       dotnetBody.blockEntryPointsManager.swapGotoEntryUnit(ifRetCondStmt, returnStmt);
     }
     jb.getUnits().addAll(handlerFilterContainerBlockBody.getUnits());
 
     // handler body
-    if (lastStmtIsNotReturn(handlerBody)) {
+    if (handlerBody.getUnits().isEmpty() || lastStmtIsNotReturn(handlerBody)) {
       // if last stmt is not return, insert goto stmt, to go to end whole block
       handlerBody.getUnits().add(Jimple.v().newGotoStmt(nopStmtEnd));
     }

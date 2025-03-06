@@ -10,12 +10,12 @@ package soot.toDex;
  * it under the terms of the GNU Lesser General Public License as
  * published by the Free Software Foundation, either version 2.1 of the
  * License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Lesser Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Lesser Public
  * License along with this program.  If not, see
  * <http://www.gnu.org/licenses/lgpl-2.1.html>.
@@ -44,6 +44,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.jar.Attributes;
 import java.util.jar.JarFile;
@@ -155,6 +156,7 @@ import soot.tagkit.AnnotationStringElem;
 import soot.tagkit.AnnotationTag;
 import soot.tagkit.ConstantValueTag;
 import soot.tagkit.DeprecatedTag;
+import soot.tagkit.DexInnerClassTag;
 import soot.tagkit.DoubleConstantValueTag;
 import soot.tagkit.EnclosingMethodTag;
 import soot.tagkit.FloatConstantValueTag;
@@ -312,7 +314,7 @@ public class DexPrinter {
       }
 
       if (Options.v().output_jar()) {
-        // if we create JAR file, MANIFEST.MF is preferred
+        // if we create JAR file, MANIFEST.MF is preferred.
         addManifest(outputZip, files);
       }
 
@@ -403,8 +405,8 @@ public class DexPrinter {
     try (BufferedOutputStream bufOut = new BufferedOutputStream(destination)) {
       manifest.write(bufOut);
       bufOut.flush();
+      destination.closeEntry();
     }
-    destination.closeEntry();
   }
 
   /**
@@ -496,9 +498,9 @@ public class DexPrinter {
         Collection<AnnotationElem> elems = e.getValue().getElems();
         if (!elems.isEmpty()) {
           elements = new ArrayList<AnnotationElement>();
-          Set<String> alreadyWritten = new HashSet<String>();
+          Set<AnnotationElem> alreadyWritten = new HashSet<AnnotationElem>();
           for (AnnotationElem ae : elems) {
-            if (!alreadyWritten.add(ae.getName())) {
+            if (!alreadyWritten.add(ae)) {
               throw new DexPrinterException("Duplicate annotation attribute: " + ae.getName());
             }
             elements.add(new ImmutableAnnotationElement(ae.getName(), buildEncodedValueForAnnotation(ae)));
@@ -670,7 +672,7 @@ public class DexPrinter {
     }
   }
 
-  private Set<Annotation> buildClassAnnotations(SootClass c) {
+  protected Set<Annotation> buildClassAnnotations(SootClass c) {
     Set<String> skipList = new HashSet<String>();
     Set<Annotation> annotations = buildCommonAnnotations(c, skipList);
 
@@ -855,7 +857,7 @@ public class DexPrinter {
     return annotations;
   }
 
-  private List<ImmutableAnnotation> buildVisibilityAnnotationTag(VisibilityAnnotationTag t, Set<String> skipList) {
+  protected List<ImmutableAnnotation> buildVisibilityAnnotationTag(VisibilityAnnotationTag t, Set<String> skipList) {
     if (t.getAnnotations() == null) {
       return Collections.emptyList();
     }
@@ -1006,11 +1008,19 @@ public class DexPrinter {
             = new ImmutableAnnotationElement("accessFlags", new ImmutableIntEncodedValue(icTag.getAccessFlags()));
         elements.add(flagsElement);
 
-        ImmutableEncodedValue nameValue;
-        if (icTag.getShortName() != null && !icTag.getShortName().isEmpty()) {
-          nameValue = new ImmutableStringEncodedValue(icTag.getShortName());
-        } else {
-          nameValue = ImmutableNullEncodedValue.INSTANCE;
+        ImmutableEncodedValue nameValue = null;
+        if (icTag instanceof DexInnerClassTag) {
+          DexInnerClassTag dx = (DexInnerClassTag) icTag;
+          if (dx.getOriginalName() != null) {
+            nameValue = new ImmutableStringEncodedValue(dx.getOriginalName());
+          }
+        }
+        if (nameValue == null) {
+          if (icTag.getShortName() != null && !icTag.getShortName().isEmpty()) {
+            nameValue = new ImmutableStringEncodedValue(icTag.getShortName());
+          } else {
+            nameValue = ImmutableNullEncodedValue.INSTANCE;
+          }
         }
 
         elements.add(new ImmutableAnnotationElement("name", nameValue));
@@ -1107,7 +1117,7 @@ public class DexPrinter {
 
   /**
    * Checks whether the given method shall be ignored, i.e., not written out to dex
-   * 
+   *
    * @param sm
    *          The method to check
    * @return True to ignore the method while writing the dex file, false to write it out as normal
@@ -1118,7 +1128,7 @@ public class DexPrinter {
 
   /**
    * Checks whether the given field shall be ignored, i.e., not written out to dex
-   * 
+   *
    * @param sf
    *          The field to check
    * @return True to ignore the field while writing the dex file, false to write it out as normal
@@ -1273,9 +1283,9 @@ public class DexPrinter {
     toTries(activeBody.getTraps(), builder, labelAssigner);
 
     // Make sure that all labels have been placed by now
-    for (Label lbl : labelAssigner.getAllLabels()) {
-      if (!lbl.isPlaced()) {
-        throw new DexPrinterException("Label not placed: " + lbl);
+    for (Entry<Stmt, Label> lbl : labelAssigner.getAllStmtsToLabels()) {
+      if (!lbl.getValue().isPlaced()) {
+        throw new DexPrinterException("Label not placed for statement " + lbl.getKey());
       }
     }
 
@@ -1284,9 +1294,9 @@ public class DexPrinter {
 
   /**
    * Creates a statement visitor to build code for each statement.
-   * 
+   *
    * Allows subclasses to use own implementations
-   * 
+   *
    * @param belongingMethod
    *          the method
    * @param arrayInitDetector
@@ -1299,7 +1309,7 @@ public class DexPrinter {
 
   /**
    * Writes out the information stored in the tags associated with the given statement
-   * 
+   *
    * @param builder
    *          The builder used to generate the Dalvik method implementation
    * @param stmt
@@ -1388,7 +1398,7 @@ public class DexPrinter {
                 /*
                  * Assuming every instruction between this instruction and the jump target is a CONST_STRING instruction, how
                  * much could the distance increase?
-                 * 
+                 *
                  * Because we only spend the effort to count the number of CONST_STRING instructions if there is a real
                  * chance that it changes the distance to overflow the allowed maximum.
                  */

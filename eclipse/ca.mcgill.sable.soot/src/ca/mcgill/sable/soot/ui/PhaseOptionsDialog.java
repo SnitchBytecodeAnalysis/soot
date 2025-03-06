@@ -996,12 +996,6 @@ public class PhaseOptionsDialog extends AbstractOptionsDialog implements Selecti
 		String nextListToken;
 
 	
-		boolRes = getGeneral_Optionscoffi_widget().getButton().getSelection();
-		defBoolRes = false;
-
-		if (boolRes != defBoolRes) {
-			getConfig().put(getGeneral_Optionscoffi_widget().getAlias(), new Boolean(boolRes));
-		}
 		boolRes = getGeneral_Optionsjasmin_backend_widget().getButton().getSelection();
 		defBoolRes = false;
 
@@ -1211,6 +1205,12 @@ public class PhaseOptionsDialog extends AbstractOptionsDialog implements Selecti
 
 		if (boolRes != defBoolRes) {
 			getConfig().put(getInput_Optionsdrop_bodies_after_load_widget().getAlias(), new Boolean(boolRes));
+		}
+		boolRes = getInput_Optionsnative_code_widget().getButton().getSelection();
+		defBoolRes = false;
+
+		if (boolRes != defBoolRes) {
+			getConfig().put(getInput_Optionsnative_code_widget().getAlias(), new Boolean(boolRes));
 		}
 		stringRes = getInput_Optionssoot_classpath_widget().getText().getText();
 		defStringRes = "";
@@ -4553,16 +4553,6 @@ public class PhaseOptionsDialog extends AbstractOptionsDialog implements Selecti
 
 		
 		
-	private BooleanOptionWidget General_Optionscoffi_widget;
-	
-	private void setGeneral_Optionscoffi_widget(BooleanOptionWidget widget) {
-		General_Optionscoffi_widget = widget;
-	}
-	
-	public BooleanOptionWidget getGeneral_Optionscoffi_widget() {
-		return General_Optionscoffi_widget;
-	}	
-	
 	private BooleanOptionWidget General_Optionsjasmin_backend_widget;
 	
 	private void setGeneral_Optionsjasmin_backend_widget(BooleanOptionWidget widget) {
@@ -4913,6 +4903,16 @@ public class PhaseOptionsDialog extends AbstractOptionsDialog implements Selecti
 	
 	public BooleanOptionWidget getInput_Optionsdrop_bodies_after_load_widget() {
 		return Input_Optionsdrop_bodies_after_load_widget;
+	}	
+	
+	private BooleanOptionWidget Input_Optionsnative_code_widget;
+	
+	private void setInput_Optionsnative_code_widget(BooleanOptionWidget widget) {
+		Input_Optionsnative_code_widget = widget;
+	}
+	
+	public BooleanOptionWidget getInput_Optionsnative_code_widget() {
+		return Input_Optionsnative_code_widget;
 	}	
 	
 
@@ -8620,17 +8620,6 @@ public class PhaseOptionsDialog extends AbstractOptionsDialog implements Selecti
 		
 		
 
-		defKey = ""+" "+""+" "+"coffi";
-		defKey = defKey.trim();
-
-		if (isInDefList(defKey)) {
-			defaultBool = getBoolDef(defKey);	
-		} else {
-			defaultBool = false;
-		}
-
-		setGeneral_Optionscoffi_widget(new BooleanOptionWidget(editGroupGeneral_Options, SWT.NONE, new OptionData("Coffi Frontend", "", "","coffi", "\n", defaultBool)));
-
 		defKey = ""+" "+""+" "+"jasmin-backend";
 		defKey = defKey.trim();
 
@@ -9046,6 +9035,17 @@ public class PhaseOptionsDialog extends AbstractOptionsDialog implements Selecti
 		}
 
 		setInput_Optionsdrop_bodies_after_load_widget(new BooleanOptionWidget(editGroupInput_Options, SWT.NONE, new OptionData("Drop method source after loading bodies", "", "","drop-bodies-after-load", "\nEach method is associated with a method source for loading its \nbody. When this option is disabled, a reference to this source \nis kept around even after the body has already been loaded. This \nis a waste of memory for most use cases. When this option is \nenabled, the reference is dropped, allowing for garbage \ncollection of the method source. On the other hand, if the body \nis ever released, it cannot easily be recovered (i.e., loaded \nagain) easily.", defaultBool)));
+
+		defKey = ""+" "+""+" "+"nc native-code";
+		defKey = defKey.trim();
+
+		if (isInDefList(defKey)) {
+			defaultBool = getBoolDef(defKey);	
+		} else {
+			defaultBool = false;
+		}
+
+		setInput_Optionsnative_code_widget(new BooleanOptionWidget(editGroupInput_Options, SWT.NONE, new OptionData("Enable native code", "", "","nc native-code", "\nThis option is needed, when analyzing native code. Particularly \nwhen using the Java Native Interface (JNI). If this option is \nenabled (set true), it allows native methods to be concrete. \nThis flag will be checked in the SootMethod.isConcrete() method, \nallowing native methods to have a body.", defaultBool)));
 
 		data = new OptionData [] {
 		

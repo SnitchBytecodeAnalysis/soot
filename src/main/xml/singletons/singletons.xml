@@ -14,10 +14,8 @@
   <class>soot.tagkit.TagManager</class>
   <class>soot.jimple.toolkits.pointer.representations.Environment</class>
   <class>soot.jimple.toolkits.pointer.representations.TypeConstants</class>
-  <class>soot.coffi.Util</class>
   <class>soot.SourceLocator</class>
   <class>soot.ModulePathSourceLocator</class>
-  <class>soot.coffi.CONSTANT_Utf8_collector</class>
   <class>soot.dava.toolkits.base.finders.AbruptEdgeFinder</class>
   <class>soot.jimple.toolkits.base.Aggregator</class>
   <class>soot.jimple.toolkits.annotation.arraycheck.ArrayBoundsChecker</class>
@@ -28,6 +26,7 @@
   <class>soot.BooleanType</class>
   <class>soot.jimple.toolkits.scalar.pre.BusyCodeMotion</class>
   <class>soot.ByteType</class>
+  <class>soot.UByteType</class>
   <class>soot.jimple.toolkits.pointer.CastCheckEliminatorDumper</class>
   <class>soot.CharType</class>
   <class>soot.jimple.toolkits.annotation.arraycheck.ClassFieldAnalysis</class>
@@ -36,6 +35,7 @@
   <class>soot.jimple.toolkits.scalar.ConstantPropagatorAndFolder</class>
   <class>soot.grimp.toolkits.base.ConstructorFolder</class>
   <class>soot.jimple.toolkits.scalar.CopyPropagator</class>
+  <class>soot.dotnet.members.method.TransformIntsToBooleans</class>
   <class>soot.jimple.toolkits.graph.CriticalEdgeRemover</class>
   <class>soot.dava.toolkits.base.finders.CycleFinder</class>
   <class>soot.dava.Dava</class>
@@ -44,7 +44,6 @@
   <class>soot.Printer</class>
   <class>soot.jimple.toolkits.scalar.DeadAssignmentEliminator</class>
   <class>soot.jimple.toolkits.pointer.DependenceTagAggregator</class>
-  <class>soot.coffi.Double2ndHalfType</class>
   <class>soot.DoubleType</class>
   <class>soot.baf.DoubleWordType</class>
   <class>soot.jimple.toolkits.pointer.DumbPointerAnalysis</class>
@@ -57,6 +56,7 @@
   <class>soot.grimp.Grimp</class>
   <class>soot.dava.toolkits.base.finders.IfFinder</class>
   <class>soot.IntType</class>
+  <class>soot.UIntType</class>
   <class>soot.jimple.Jimple</class>
   <class>soot.dava.toolkits.base.finders.LabeledBlockFinder</class>
   <class>soot.jimple.toolkits.scalar.pre.LazyCodeMotion</class>
@@ -70,8 +70,8 @@
   <class>soot.toolkits.scalar.LocalSplitter</class>
   <class>soot.toolkits.scalar.SharedInitializationLocalSplitter</class>
   <class>soot.toolkits.scalar.FlowSensitiveConstantPropagator</class>
-  <class>soot.coffi.Long2ndHalfType</class>
   <class>soot.LongType</class>
+  <class>soot.ULongType</class>
   <class>soot.dava.toolkits.base.misc.MonitorConverter</class>
   <class>soot.jimple.toolkits.scalar.NopEliminator</class>
   <class>soot.jimple.NullConstant</class>
@@ -92,6 +92,8 @@
   <class>soot.shimple.ShimpleTransformer</class>
   <class>soot.shimple.toolkits.scalar.SConstantPropagatorAndFolder</class>
   <class>soot.ShortType</class>
+  <class>soot.UShortType</class>
+  <class>soot.DecimalType</class>
   <class>soot.jimple.toolkits.pointer.SideEffectTagger</class>
   <class>soot.jimple.spark.SparkTransformer</class>
   <class>soot.jimple.toolkits.invoke.StaticInliner</class>
@@ -113,7 +115,6 @@
   <class>soot.UnknownType</class>
   <class>soot.jimple.toolkits.scalar.UnreachableCodeEliminator</class>
   <class>soot.toolkits.scalar.UnusedLocalEliminator</class>
-  <class>soot.coffi.UnusuableType</class>
   <class>soot.dava.toolkits.base.AST.UselessTryRemover</class>
   <class>soot.VoidType</class>
   <class>soot.baf.WordType</class>
@@ -181,4 +182,5 @@
   <class>soot.LambdaMetaFactory</class>
   <class>soot.jbco.jimpleTransformations.FieldRenamer</class>
   <class>soot.toolkits.scalar.LocalDefsFactory</class>
+  <class>soot.ArrayTypeCache</class>
 </singletons>

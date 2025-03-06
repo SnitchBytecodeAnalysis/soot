@@ -114,10 +114,6 @@ public class AntTask extends MatchingTask {
 
 
 
-        public void setcoffi(boolean arg) {
-            if(arg) addArg("-coffi");
-        }
-  
         public void setjasmin_backend(boolean arg) {
             if(arg) addArg("-jasmin-backend");
         }
@@ -344,6 +340,10 @@ public class AntTask extends MatchingTask {
   
         public void setdrop_bodies_after_load(boolean arg) {
             if(arg) addArg("-drop-bodies-after-load");
+        }
+  
+        public void setnative_code(boolean arg) {
+            if(arg) addArg("-native-code");
         }
   
         public void setoutput_dir(String arg) {

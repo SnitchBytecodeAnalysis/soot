@@ -26,7 +26,7 @@ import com.google.common.base.Optional;
 
 import java.util.ArrayDeque;
 
-import soot.dotnet.types.DotnetBasicTypes;
+import soot.dotnet.types.DotNetBasicTypes;
 import soot.options.Options;
 import soot.util.Switch;
 
@@ -64,10 +64,11 @@ public class RefType extends RefLikeType implements Comparable<RefType> {
   }
 
   public static RefType v() {
-    if (ModuleUtil.module_mode()) {
-      return G.v().soot_ModuleRefType();
+    G g = G.v();
+    if (g.soot_ModuleUtil().isInModuleMode()) {
+      return g.soot_ModuleRefType();
     } else {
-      return G.v().soot_RefType();
+      return g.soot_RefType();
     }
   }
 
@@ -243,7 +244,7 @@ public class RefType extends RefLikeType implements Comparable<RefType> {
   @Override
   public Type getArrayElementType() {
     if (Options.v().src_prec() == Options.src_prec_dotnet) {
-      if (DotnetBasicTypes.SYSTEM_OBJECT.equals(className) || DotnetBasicTypes.SYSTEM_ICLONEABLE.equals(className)) {
+      if (DotNetBasicTypes.SYSTEM_OBJECT.equals(className) || DotNetBasicTypes.SYSTEM_ICLONEABLE.equals(className)) {
         return Scene.v().getObjectType();
       }
     }

@@ -89,11 +89,16 @@ public class ReachableMethods {
     }
     while (unprocessedMethods.hasNext()) {
       MethodOrMethodContext m = unprocessedMethods.next();
+      if (m == null) {
+        continue;
+      }
       Iterator<Edge> targets = cg.edgesOutOf(m);
       if (filter != null) {
         targets = filter.wrap(targets);
       }
-      addMethods(new Targets(targets));
+      if (targets.hasNext()) {
+        addMethods(new Targets(targets));
+      }
     }
   }
 

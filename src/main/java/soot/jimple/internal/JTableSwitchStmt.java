@@ -128,9 +128,13 @@ public class JTableSwitchStmt extends AbstractSwitchStmt implements TableSwitchS
     up.literal("    " + Jimple.CASE + " ");
     up.literal(Integer.toString(targetIndex));
     up.literal(": " + Jimple.GOTO + " ");
-    targetBoxes[targetIndex - lowIndex].toString(up);
+    targetBoxes.get(targetIndex - lowIndex).toString(up);
     up.literal(";");
     up.newline();
+  }
+
+  public List<UnitBox> getTargetBoxes() {
+    return targetBoxes;
   }
 
   @Override
@@ -172,5 +176,24 @@ public class JTableSwitchStmt extends AbstractSwitchStmt implements TableSwitchS
     Unit u = vaf.newTableSwitchInst(vaf.newPlaceholderInst(getDefaultTarget()), lowIndex, highIndex, targetPlaceholders);
     u.addAllTagsOf(this);
     out.add(u);
+  }
+
+  @Override
+  public Unit getTargetForValue(int value) {
+
+    final int high = highIndex;
+    int tgtIdx = 0;
+    // In this for-loop, we cannot use "<=" since 'i' would wrap around.
+    // The case for "i == highIndex" is handled separately after the loop.
+    for (int i = lowIndex; i < high; i++) {
+      if (value == i) {
+        return getTarget(tgtIdx);
+      }
+      tgtIdx++;
+    }
+    if (high == value) {
+      return getTarget(tgtIdx);
+    }
+    return getDefaultTarget();
   }
 }

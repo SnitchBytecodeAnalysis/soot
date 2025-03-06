@@ -14,6 +14,7 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -55,14 +56,14 @@ import org.slf4j.LoggerFactory;
 import pxb.android.axml.AxmlReader;
 import pxb.android.axml.AxmlVisitor;
 import pxb.android.axml.NodeVisitor;
+
 import soot.dexpler.DalvikThrowAnalysis;
 import soot.dotnet.exceptiontoolkits.DotnetThrowAnalysis;
 import soot.dotnet.members.DotnetMethod;
-import soot.dotnet.types.DotnetBasicTypes;
+import soot.dotnet.types.DotNetBasicTypes;
 import soot.javaToJimple.DefaultLocalGenerator;
 import soot.jimple.spark.internal.ClientAccessibilityOracle;
 import soot.jimple.spark.internal.PublicAndProtectedAccessibility;
-import soot.jimple.spark.pag.SparkField;
 import soot.jimple.toolkits.callgraph.CallGraph;
 import soot.jimple.toolkits.callgraph.ContextSensitiveCallGraph;
 import soot.jimple.toolkits.callgraph.ReachableMethods;
@@ -79,10 +80,8 @@ import soot.util.ArrayNumberer;
 import soot.util.Chain;
 import soot.util.HashChain;
 import soot.util.IterableNumberer;
-import soot.util.MapNumberer;
-import soot.util.Numberer;
+import soot.util.NumberedString;
 import soot.util.StringNumberer;
-import soot.util.WeakMapNumberer;
 
 /**
  * Manages the SootClasses of the application being analyzed.
@@ -95,10 +94,6 @@ public class Scene {
 
   protected final Map<String, RefType> nameToClass = new ConcurrentHashMap<String, RefType>();
 
-  protected final ArrayNumberer<Kind> kindNumberer = new ArrayNumberer<Kind>(
-      new Kind[] { Kind.INVALID, Kind.STATIC, Kind.VIRTUAL, Kind.INTERFACE, Kind.SPECIAL, Kind.CLINIT, Kind.THREAD,
-          Kind.EXECUTOR, Kind.ASYNCTASK, Kind.FINALIZE, Kind.INVOKE_FINALIZE, Kind.PRIVILEGED, Kind.NEWINSTANCE });
-
   protected final Set<String> reservedNames = new HashSet<String>();
   @SuppressWarnings("unchecked")
   protected final Set<String>[] basicclasses = new Set[4];
@@ -109,13 +104,7 @@ public class Scene {
   protected Chain<SootClass> phantomClasses = new HashChain<SootClass>();
 
   protected IterableNumberer<Type> typeNumberer = new ArrayNumberer<Type>();
-  protected Numberer<Unit> unitNumberer = new MapNumberer<Unit>();
   protected StringNumberer subSigNumberer = new StringNumberer();
-  protected IterableNumberer<SootClass> classNumberer;
-  protected Numberer<SparkField> fieldNumberer;
-  protected IterableNumberer<SootMethod> methodNumberer;
-  protected IterableNumberer<Local> localNumberer;
-  protected Numberer<Context> contextNumberer;
 
   protected Hierarchy activeHierarchy;
   protected FastHierarchy activeFastHierarchy;
@@ -145,6 +134,8 @@ public class Scene {
   private AndroidVersionInfo androidSDKVersionInfo;
   private int androidAPIVersion = -1;
 
+  protected List<ISootClassAddedListener> classAddedListeners = new ArrayList<>(4);
+
   public Scene(Singletons.Global g) {
     setReservedNames();
 
@@ -154,31 +145,20 @@ public class Scene {
       setSootClassPath(scp);
     }
 
-    if (Options.v().weak_map_structures()) {
-      this.classNumberer = new WeakMapNumberer<SootClass>();
-      this.fieldNumberer = new WeakMapNumberer<SparkField>();
-      this.methodNumberer = new WeakMapNumberer<SootMethod>();
-      this.localNumberer = new WeakMapNumberer<Local>();
-    } else {
-      this.classNumberer = new ArrayNumberer<SootClass>();
-      this.fieldNumberer = new ArrayNumberer<SparkField>();
-      this.methodNumberer = new ArrayNumberer<SootMethod>();
-      this.localNumberer = new ArrayNumberer<Local>();
-    }
-
     if (Options.v().src_prec() == Options.src_prec_dotnet) {
       addSootBasicDotnetClasses();
     } else {
       addSootBasicClasses();
-      determineExcludedPackages();
     }
+    determineExcludedPackages();
   }
 
   public static Scene v() {
-    if (ModuleUtil.module_mode()) {
-      return G.v().soot_ModuleScene();
+    G g = G.v();
+    if (g.soot_ModuleUtil().isInModuleMode()) {
+      return g.soot_ModuleScene();
     } else {
-      return G.v().soot_Scene();
+      return g.soot_Scene();
     }
   }
 
@@ -314,7 +294,7 @@ public class Scene {
         ? mainClass.getMethodUnsafe("main", Collections.singletonList(ArrayType.v(RefType.v("java.lang.String"), 1)),
             VoidType.v())
         : mainClass.getMethodUnsafe("Main",
-            Collections.singletonList(ArrayType.v(RefType.v(DotnetBasicTypes.SYSTEM_STRING), 1)), VoidType.v());
+            Collections.singletonList(ArrayType.v(RefType.v(DotNetBasicTypes.SYSTEM_STRING), 1)), VoidType.v());
     if (mainMethod == null) {
       throw new RuntimeException("Main class declares no main method!");
     }
@@ -327,8 +307,16 @@ public class Scene {
   }
 
   public void extendSootClassPath(String newPathElement) {
-    sootClassPath += File.pathSeparatorChar + newPathElement;
+    if (sootClassPath == null) {
+      sootClassPath = newPathElement;
+    } else {
+      sootClassPath += File.pathSeparatorChar + newPathElement;
+    }
     SourceLocator.v().extendClassPath(newPathElement);
+  }
+
+  public void reset() {
+    sootClassPath = null;
   }
 
   public String getSootClassPath() {
@@ -363,8 +351,7 @@ public class Scene {
         for (String path : dirs) {
           if (!cp.contains(path)) {
             // To support paths to jars with ':' in the name, escape the path separator if it was not already escaped.
-            path = path.replaceAll("(?<!\\\\)" + Pattern.quote(File.pathSeparator),
-              "\\\\" + File.pathSeparator);
+            path = path.replaceAll("(?<!\\\\)" + Pattern.quote(File.pathSeparator), "\\\\" + File.pathSeparator);
             pds.append(path).append(File.pathSeparatorChar);
           }
         }
@@ -863,6 +850,8 @@ public class Scene {
       }
       nameToClass.computeIfAbsent(c.getName(), k -> c.getType());
     }
+
+    classAddedListeners.stream().forEach(l -> l.onSootClassAdded(c));
   }
 
   public void removeClass(SootClass c) {
@@ -1152,7 +1141,7 @@ public class Scene {
   /** Returns the {@link RefType} for {@link Object}. */
   public RefType getObjectType() {
     if (Options.v().src_prec() == Options.src_prec_dotnet) {
-      return getRefType(DotnetBasicTypes.SYSTEM_OBJECT);
+      return getRefType(DotNetBasicTypes.SYSTEM_OBJECT);
     }
     return getRefType("java.lang.Object");
   }
@@ -1164,7 +1153,7 @@ public class Scene {
    */
   public RefType getBaseExceptionType() {
     if (Options.v().src_prec() == Options.src_prec_dotnet) {
-      return getRefType(DotnetBasicTypes.SYSTEM_EXCEPTION);
+      return getRefType(DotNetBasicTypes.SYSTEM_EXCEPTION);
     }
     return getRefType("java.lang.Throwable");
   }
@@ -1500,47 +1489,12 @@ public class Scene {
     return getPhantomRefs();
   }
 
-  public Numberer<Kind> kindNumberer() {
-    return kindNumberer;
-  }
-
   public IterableNumberer<Type> getTypeNumberer() {
     return typeNumberer;
   }
 
-  public IterableNumberer<SootMethod> getMethodNumberer() {
-    return methodNumberer;
-  }
-
-  public Numberer<Context> getContextNumberer() {
-    return contextNumberer;
-  }
-
-  public Numberer<Unit> getUnitNumberer() {
-    return unitNumberer;
-  }
-
-  public Numberer<SparkField> getFieldNumberer() {
-    return fieldNumberer;
-  }
-
-  public IterableNumberer<SootClass> getClassNumberer() {
-    return classNumberer;
-  }
-
   public StringNumberer getSubSigNumberer() {
     return subSigNumberer;
-  }
-
-  public IterableNumberer<Local> getLocalNumberer() {
-    return localNumberer;
-  }
-
-  public void setContextNumberer(Numberer<Context> n) {
-    if (contextNumberer != null) {
-      throw new RuntimeException("Attempt to set context numberer when it is already set.");
-    }
-    contextNumberer = n;
   }
 
   /**
@@ -1678,6 +1632,7 @@ public class Scene {
 
     addBasicClass("java.lang.String");
     addBasicClass("java.lang.StringBuffer", SootClass.SIGNATURES);
+    addBasicClass("java.lang.StringBuilder", SootClass.SIGNATURES);
     addBasicClass("java.lang.Enum", SootClass.SIGNATURES);
 
     addBasicClass("java.lang.Error");
@@ -1726,90 +1681,89 @@ public class Scene {
   }
 
   private void addSootBasicDotnetClasses() {
-    basicclasses[SootClass.HIERARCHY] = new HashSet<>();
-    basicclasses[SootClass.SIGNATURES] = new HashSet<>();
-    basicclasses[SootClass.BODIES] = new HashSet<>();
+    basicclasses[SootClass.HIERARCHY] = new LinkedHashSet<>();
+    basicclasses[SootClass.SIGNATURES] = new LinkedHashSet<>();
+    basicclasses[SootClass.BODIES] = new LinkedHashSet<>();
 
-    addBasicClass(DotnetBasicTypes.SYSTEM_OBJECT, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_VOID, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_BOOLEAN, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_BYTE, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_CHAR, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_INT16, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_INT32, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_INT64, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_SINGLE, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_DOUBLE, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_OBJECT, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_VOID, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_BOOLEAN, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_BYTE, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_CHAR, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_INT16, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_INT32, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_INT64, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_SINGLE, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_DOUBLE, SootClass.SIGNATURES);
 
-    addBasicClass(DotnetBasicTypes.SYSTEM_STRING, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_ENUM, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_TYPE, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_STRING, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_ENUM, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_TYPE, SootClass.SIGNATURES);
 
-    addBasicClass(DotnetBasicTypes.SYSTEM_SBYTE, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_DECIMAL, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_INTPTR, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_UINTPTR, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_UINTPTR, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_UINT16, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_UINT32, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_UINT64, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_SBYTE, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_DECIMAL, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_INTPTR, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_UINTPTR, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_UINTPTR, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_UINT16, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_UINT32, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_UINT64, SootClass.SIGNATURES);
 
-    addBasicClass(DotnetBasicTypes.SYSTEM_EXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_ACCESSVIOLATIONEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_AGGREGATEEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_APPDOMAINUNLOADEDEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_APPLICATIONEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_ARGUMENTEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_ARGUMENTNULLEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_ARGUMENTOUTOFRANGEEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_ARITHMETICEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_ARRAYTYPEMISMATCHEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_BADIMAGEFORMATEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_CANNOTUNLOADAPPDOMAINEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_CONTEXTMARSHALEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_DATAMISALIGNEDEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_DIVIDEBYZEROEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_DLLNOTFOUNDEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_DUPLICATEWAITOBJECTEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_ENTRYPOINTNOTFOUNDEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_EXECUTIONENGINEEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_FIELDACCESSEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_FORMATEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_INDEXOUTOFRANGEEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_INSUFFICIENTEXECUTIONSTACKEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_INSUFFICIENTMEMORYEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_INVALIDCASTEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_INVALIDOPERATIONEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_INVALIDPROGRAMEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_INVALIDTIMEZONEEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_MISSINGFIELDEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_MISSINGMETHODEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_NULLREFERENCEEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_OUTOFMEMORYEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_OVERFLOWEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_SYSTEMEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_TYPEACCESSEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_TYPEINITIALIZATIONEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_TYPELOADEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_TYPEUNLOADEDEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_UNAUTHORIZEDACCESSEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_URIFORMATEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_EXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_ACCESSVIOLATIONEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_AGGREGATEEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_APPDOMAINUNLOADEDEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_APPLICATIONEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_ARGUMENTEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_ARGUMENTNULLEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_ARGUMENTOUTOFRANGEEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_ARITHMETICEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_ARRAYTYPEMISMATCHEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_BADIMAGEFORMATEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_CANNOTUNLOADAPPDOMAINEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_CONTEXTMARSHALEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_DATAMISALIGNEDEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_DIVIDEBYZEROEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_DLLNOTFOUNDEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_DUPLICATEWAITOBJECTEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_ENTRYPOINTNOTFOUNDEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_EXECUTIONENGINEEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_FIELDACCESSEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_FORMATEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_INDEXOUTOFRANGEEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_INSUFFICIENTEXECUTIONSTACKEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_INSUFFICIENTMEMORYEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_INVALIDCASTEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_INVALIDOPERATIONEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_INVALIDPROGRAMEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_INVALIDTIMEZONEEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_MISSINGFIELDEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_MISSINGMETHODEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_NULLREFERENCEEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_OUTOFMEMORYEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_OVERFLOWEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_SYSTEMEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_TYPEACCESSEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_TYPEINITIALIZATIONEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_TYPELOADEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_TYPEUNLOADEDEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_UNAUTHORIZEDACCESSEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_URIFORMATEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_VERIFICATIONEXCEPTION, SootClass.SIGNATURES);
 
-    addBasicClass(DotnetBasicTypes.SYSTEM_SECURITYEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_METHODACCESSEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_VERIFICATIONEXCEPTION, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_STACKOVERFLOWEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_SECURITYEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_METHODACCESSEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_VERIFICATIONEXCEPTION, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_STACKOVERFLOWEXCEPTION, SootClass.SIGNATURES);
 
-    addBasicClass(DotnetBasicTypes.SYSTEM_THREADING, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_THREADING, SootClass.SIGNATURES);
 
-    addBasicClass(DotnetBasicTypes.SYSTEM_SERIALIZEABLEATTRIBUTE, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_SERIALIZEABLEATTRIBUTE, SootClass.SIGNATURES);
 
-    addBasicClass(DotnetBasicTypes.SYSTEM_CONSOLE, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_RUNTIMEFIELDHANDLE, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_RUNTIMEMETHODHANDLE, SootClass.SIGNATURES);
-    addBasicClass(DotnetBasicTypes.SYSTEM_RUNTIMETYPEHANDLE, SootClass.SIGNATURES);
-
-    addBasicClass(DotnetBasicTypes.FAKE_LDFTN, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_CONSOLE, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_RUNTIMEFIELDHANDLE, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_RUNTIMEMETHODHANDLE, SootClass.SIGNATURES);
+    addBasicClass(DotNetBasicTypes.SYSTEM_RUNTIMETYPEHANDLE, SootClass.SIGNATURES);
   }
 
   public void addBasicClass(String name) {
@@ -2097,6 +2051,30 @@ public class Scene {
     }
   }
 
+  /** Create an unresolved reference to a method. */
+  public SootMethodRef makeMethodRef(SootClass declaringClass, String subsig, boolean isStatic) {
+    NumberedString numbered = Scene.v().getSubSigNumberer().findOrAdd(subsig);
+    MethodSubSignature sootSubsig = new MethodSubSignature(numbered);
+    if (PolymorphicMethodRef.handlesClass(declaringClass)) {
+      return new PolymorphicMethodRef(declaringClass, sootSubsig.getMethodName(), sootSubsig.getParameterTypes(),
+          sootSubsig.getReturnType(), isStatic);
+    } else {
+      return new SootMethodRefImpl(declaringClass, sootSubsig.getMethodName(), sootSubsig.getParameterTypes(),
+          sootSubsig.getReturnType(), isStatic);
+    }
+  }
+
+  /** Create an unresolved reference to a method. */
+  public SootMethodRef makeMethodRef(SootClass declaringClass, MethodSubSignature subsig, boolean isStatic) {
+    if (PolymorphicMethodRef.handlesClass(declaringClass)) {
+      return new PolymorphicMethodRef(declaringClass, subsig.getMethodName(), subsig.getParameterTypes(),
+          subsig.getReturnType(), isStatic);
+    } else {
+      return new SootMethodRefImpl(declaringClass, subsig.getMethodName(), subsig.getParameterTypes(),
+          subsig.getReturnType(), isStatic);
+    }
+  }
+
   /** Create an unresolved reference to a constructor. */
   public SootMethodRef makeConstructorRef(SootClass declaringClass, List<Type> parameterTypes) {
     return makeMethodRef(declaringClass, SootMethod.constructorName, parameterTypes, VoidType.v(), false);
@@ -2126,7 +2104,7 @@ public class Scene {
     doneResolving = true;
   }
 
-  void setResolving(boolean value) {
+  public void setResolving(boolean value) {
     doneResolving = value;
   }
 
@@ -2137,7 +2115,7 @@ public class Scene {
         setMainClass(getSootClass(optsMain));
       } else {
         final List<Type> mainArgs = Collections.singletonList(
-            ArrayType.v(Options.v().src_prec() == Options.src_prec_dotnet ? RefType.v(DotnetBasicTypes.SYSTEM_STRING)
+            ArrayType.v(Options.v().src_prec() == Options.src_prec_dotnet ? RefType.v(DotNetBasicTypes.SYSTEM_STRING)
                 : RefType.v("java.lang.String"), 1));
         // try to infer a main class from the command line if none is given
         for (String next : Options.v().classes()) {
@@ -2255,5 +2233,34 @@ public class Scene {
 
   public LocalCreation createLocalCreation(Chain<Local> locals, String prefix) {
     return new DefaultLocalCreation(locals, prefix);
+  }
+
+  /**
+   * Resets the sootClassPath to null. This method allows for subsequent calls to {@link #loadNecessaryClasses()} to
+   * recompute and load the classes using updated configurations if provided.
+   */
+  public void resetSootClassPathCache() {
+    this.sootClassPath = null;
+  }
+
+  /**
+   * Registers a new listener that is invoked when a new SootClass is added to the scene
+   * 
+   * @param listener
+   *          The listener that shall be invoked when a new SootClass is added to the scene
+   */
+  public void registerSootClassAddedListener(ISootClassAddedListener listener) {
+    classAddedListeners.add(listener);
+  }
+
+  /**
+   * Unrgisters a listener that processes new SootClases being added to the scene
+   * 
+   * @param listener
+   *          The listener to remove
+   */
+  public void unregisterSootClassAddedListener(ISootClassAddedListener listener) {
+    classAddedListeners.remove(listener);
+
   }
 }

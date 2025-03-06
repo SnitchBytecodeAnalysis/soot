@@ -35,6 +35,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashSet;
@@ -59,6 +60,7 @@ import org.slf4j.LoggerFactory;
 
 import soot.JavaClassProvider.JarException;
 import soot.asm.AsmClassProvider;
+import soot.asm.AsmClassSource;
 import soot.asm.AsmJava9ClassProvider;
 import soot.dexpler.DexFileProvider;
 import soot.dotnet.AssemblyFile;
@@ -166,7 +168,12 @@ public class SourceLocator {
   }
 
   public static SourceLocator v() {
-    return ModuleUtil.module_mode() ? G.v().soot_ModulePathSourceLocator() : G.v().soot_SourceLocator();
+    G g = G.v();
+    if (g.soot_ModuleUtil().isInModuleMode()) {
+      return g.soot_ModulePathSourceLocator();
+    } else {
+      return g.soot_SourceLocator();
+    }
   }
 
   /**
@@ -241,7 +248,7 @@ public class SourceLocator {
           public ClassSource find(String className) {
             String fileName = className.replace('.', '/') + ".class";
             InputStream stream = cl.getResourceAsStream(fileName);
-            return (stream == null) ? null : new CoffiClassSource(className, stream, fileName);
+            return (stream == null) ? null : new AsmClassSource(className, new ClassLoaderFoundFile(cl, fileName));
           }
         }.find(className);
         if (ret != null) {
@@ -260,7 +267,7 @@ public class SourceLocator {
         String fileName = className.replace('.', '/') + ".class";
         InputStream stream = cl.getResourceAsStream(fileName);
         if (stream != null) {
-          return new CoffiClassSource(className, stream, fileName);
+          return new AsmClassSource(className, new ClassLoaderFoundFile(cl, fileName));
         }
       }
     }
@@ -273,7 +280,7 @@ public class SourceLocator {
 
   protected void setupClassProviders() {
     final List<ClassProvider> classProviders = new LinkedList<ClassProvider>();
-    final ClassProvider classFileClassProvider = Options.v().coffi() ? new CoffiClassProvider() : new AsmClassProvider();
+    final ClassProvider classFileClassProvider = new AsmClassProvider();
     switch (Options.v().src_prec()) {
       case Options.src_prec_class:
         classProviders.add(classFileClassProvider);
@@ -431,6 +438,7 @@ public class SourceLocator {
           String fileName = element.getName();
 
           if (fileName.endsWith(".dll") || fileName.endsWith(".exe")) {
+            DotnetClassProvider.ensureAssemblyIndex();
             try {
               Map<String, File> classContainerIndex = SourceLocator.v().dexClassIndex();
               AssemblyFile assemblyFile;
@@ -443,7 +451,7 @@ public class SourceLocator {
                   continue;
                 }
               }
-              List<String> allClassNames = assemblyFile.getAllTypeNames();
+              Collection<String> allClassNames = assemblyFile.getAllTypeNames();
               if (allClassNames != null) {
                 classes.addAll(allClassNames);
               }
@@ -767,6 +775,16 @@ public class SourceLocator {
    */
   public void clearDexClassPathExtensions() {
     this.dexClassPathExtensions = null;
+  }
+
+  /**
+   * Resets the cached class path, class providers, and source path to null. This method allows for subsequent calls to
+   * {@link soot.Scene#loadNecessaryClasses()} to recompute and load the classes using updated configurations if provided.
+   */
+  public void resetCaches() {
+    this.classPath = null;
+    this.classProviders = null;
+    this.sourcePath = null;
   }
 
   protected enum ClassSourceType {
